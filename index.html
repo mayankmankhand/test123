@@ -230,8 +230,10 @@
     const PUBNUB_SUBSCRIBE_KEY = 'sub-c-0270fce5-5c93-45a8-bd18-f3322aa354b3';
     const CHANNEL_NAME = 'meri-perplexity-transactions';
 
-    // Generate unique user ID for this session
-    const USER_ID = 'user-' + Math.random().toString(36).substring(7);
+    // Generate unique user ID for this session with timestamp for extra uniqueness
+    const USER_ID = 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    
+    console.log('[PubNub] My USER_ID:', USER_ID);
 
     // Initialize PubNub (only if keys are configured)
     let pubnub = null;
@@ -241,6 +243,7 @@
         subscribeKey: PUBNUB_SUBSCRIBE_KEY,
         userId: USER_ID
       });
+      console.log('[PubNub] Initialized with USER_ID:', USER_ID);
     }
 
     const AppContext = React.createContext();
@@ -558,11 +561,16 @@
             if (event.message && event.message.type) {
               const action = event.message;
               
+              console.log('[PubNub] ===== MESSAGE RECEIVED =====');
               console.log('[PubNub] Received action:', action.type, 'Current role:', state.role);
+              console.log('[PubNub] Message senderId:', action.senderId);
+              console.log('[PubNub] My USER_ID:', USER_ID);
+              console.log('[PubNub] Are they equal?', action.senderId === USER_ID);
+              console.log('[PubNub] Full action:', JSON.stringify(action, null, 2));
               
               // Ignore messages sent by this user (prevent loops!)
               if (action.senderId === USER_ID) {
-                console.log('[PubNub] Ignoring own message');
+                console.log('[PubNub] ❌ Ignoring own message (senderId matches my USER_ID)');
                 return;
               }
               
@@ -577,7 +585,7 @@
               
               // Only apply actions relevant to current role
               if (currentRole === Roles.Seller && sellerActions.includes(action.type)) {
-                console.log('[PubNub] Applying action to Seller');
+                console.log('[PubNub] ✅ APPLYING action to Seller');
                 if (action.type === 'BUYER_SUBMIT_PAYMENT') {
                   console.log('[PubNub] Buyer email in received action:', action.buyerEmail);
                 }
@@ -585,12 +593,16 @@
                   console.log('[PubNub] Received OTP from buyer:', action.otp);
                 }
                 baseDispatch({ ...action, fromRemote: true });
+                console.log('[PubNub] Action applied! Seller state should update now.');
               } else if (currentRole === Roles.Buyer && buyerActions.includes(action.type)) {
-                console.log('[PubNub] Applying action to Buyer');
+                console.log('[PubNub] ✅ APPLYING action to Buyer');
                 baseDispatch({ ...action, fromRemote: true });
               } else {
-                console.log('[PubNub] Ignoring action - not relevant for', currentRole);
+                console.log('[PubNub] ❌ IGNORING action - not relevant for', currentRole);
+                console.log('[PubNub] Seller actions:', sellerActions);
+                console.log('[PubNub] Buyer actions:', buyerActions);
               }
+              console.log('[PubNub] ===== END MESSAGE =====');
             }
           },
           status: (statusEvent) => {
