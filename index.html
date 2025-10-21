@@ -324,6 +324,40 @@
 
         case 'SELLER_CLAIM_REQUEST':
           // Seller claims a specific transaction
+          
+          // If this is a remote claim (from another seller)
+          if (action.fromRemote) {
+            // If we're a seller, remove from our pending queue
+            if (state.role === Roles.Seller) {
+              console.log('[Transaction] Another seller claimed transaction:', action.transactionId, '- removing from queue');
+              return {
+                ...state,
+                seller: {
+                  ...state.seller,
+                  pendingRequests: state.seller.pendingRequests.filter(
+                    req => req.transactionId !== action.transactionId
+                  )
+                }
+              };
+            }
+            
+            // If we're a buyer and this is OUR transaction being claimed, record the seller ID
+            if (state.role === Roles.Buyer && state.buyer.transactionId === action.transactionId) {
+              console.log('[Transaction] Seller', action.senderId, 'claimed my transaction:', action.transactionId);
+              return {
+                ...state,
+                buyer: {
+                  ...state.buyer,
+                  assignedSellerId: action.senderId,
+                  state: BuyerStates.SellerAccepted
+                }
+              };
+            }
+            
+            return state;
+          }
+          
+          // Local claim - this seller is claiming the transaction
           const claimedRequest = state.seller.pendingRequests.find(
             req => req.transactionId === action.transactionId
           );
@@ -343,7 +377,11 @@
               hasRequest: true,
               buyerEmail: claimedRequest.buyerEmail,
               claimedTransactionId: action.transactionId,
-              requestTime: claimedRequest.timestamp
+              requestTime: claimedRequest.timestamp,
+              // Remove this request from pending queue since we're now handling it
+              pendingRequests: state.seller.pendingRequests.filter(
+                req => req.transactionId !== action.transactionId
+              )
             }
           };
 
@@ -488,7 +526,8 @@
           touched: {},
           queuePos: 0,
           progress: 0,
-          transactionId: null
+          transactionId: null,
+          assignedSellerId: null // Which seller claimed this transaction
         },
         seller: {
           state: SellerStates.Idle,
@@ -557,6 +596,11 @@
             console.log('[PubNub] Including transaction ID:', transactionId);
           }
           
+          // For SELLER_CLAIM_REQUEST, include transaction ID
+          if (action.type === 'SELLER_CLAIM_REQUEST') {
+            console.log('[PubNub] Broadcasting claim for transaction:', action.transactionId);
+          }
+          
           // For BUYER_SHARE_OTP, include the OTP
           if (action.type === 'BUYER_SHARE_OTP' && action.otp) {
             console.log('[PubNub] Including OTP in message:', action.otp);
@@ -619,8 +663,12 @@
               // Role-based action filtering
               const currentRole = state.role;
               
-              // Actions that sellers should receive (from buyers)
-              const sellerActions = ['BUYER_SUBMIT_PAYMENT', 'BUYER_SHARE_OTP'];
+              // Actions that sellers should receive (from buyers AND other sellers)
+              const sellerActions = [
+                'BUYER_SUBMIT_PAYMENT',   // From buyers
+                'BUYER_SHARE_OTP',        // From buyers
+                'SELLER_CLAIM_REQUEST'    // From other sellers (to remove from queue)
+              ];
               
               // Actions that buyers should receive (from sellers)
               const buyerActions = ['SELLER_CLAIM_REQUEST', 'SELLER_ACCEPT_REQUEST', 'SELLER_START_REDEMPTION', 'SEND_OTP', 'SELLER_COMPLETE'];
@@ -634,11 +682,27 @@
                 if (action.type === 'BUYER_SHARE_OTP') {
                   console.log('[PubNub] Received OTP from buyer:', action.otp);
                 }
+                if (action.type === 'SELLER_CLAIM_REQUEST') {
+                  console.log('[PubNub] Another seller claimed transaction:', action.transactionId);
+                }
                 baseDispatch({ ...action, fromRemote: true });
                 console.log('[PubNub] Action applied! Seller state should update now.');
               } else if (currentRole === Roles.Buyer && buyerActions.includes(action.type)) {
-                console.log('[PubNub] ✅ APPLYING action to Buyer');
-                baseDispatch({ ...action, fromRemote: true });
+                // For buyer: only accept messages from the assigned seller (except SELLER_CLAIM_REQUEST)
+                if (action.type === 'SELLER_CLAIM_REQUEST') {
+                  // Always process claim requests to know which seller claimed
+                  console.log('[PubNub] ✅ Processing seller claim');
+                  baseDispatch({ ...action, fromRemote: true });
+                } else if (state.buyer.assignedSellerId && action.senderId !== state.buyer.assignedSellerId) {
+                  // This is from a different seller - ignore it
+                  console.log('[PubNub] ❌ IGNORING action from unassigned seller');
+                  console.log('[PubNub] Message from:', action.senderId);
+                  console.log('[PubNub] My assigned seller:', state.buyer.assignedSellerId);
+                } else {
+                  // This is from our assigned seller (or we don't have one yet)
+                  console.log('[PubNub] ✅ APPLYING action to Buyer (from assigned seller)');
+                  baseDispatch({ ...action, fromRemote: true });
+                }
               } else {
                 console.log('[PubNub] ❌ IGNORING action - not relevant for', currentRole);
                 console.log('[PubNub] Seller actions:', sellerActions);
