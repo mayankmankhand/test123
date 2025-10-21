@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#1d4ed8">
+  <title>Meri Perplexity • Real-time Marketplace</title>
+
+  <!-- Fonts and React via CDN -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- PubNub SDK for real-time communication -->
+  <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.8.2.0.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --surface: #0f172a;
+      --text: #e5e7eb;
+      --muted: #9aa7bd;
+      --border: #22314a;
+      --brand: #60a5fa;
+      --brand-2: #3b82f6;
+      --success: #16a34a;
+      --error: #dc2626;
+      --warning: #f59e0b;
+      --radius: 14px;
+      --shadow: 0 8px 30px rgba(0,0,0,.5);
+      --container: 1040px;
+      --focus: #93c5fd;
+      --focus-ring: 0 0 0 3px rgba(147,197,253,.35);
+      --space: 14px;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f9fc;
+        --surface: #ffffff;
+        --text: #0b1220;
+        --muted: #475569;
+        --border: #d1d5db;
+        --brand: #3b82f6;
+        --brand-2: #1d4ed8;
+        --shadow: 0 8px 30px rgba(2,6,23,.08);
+        --focus-ring: 0 0 0 3px rgba(147,197,253,.7);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji;
+      color: var(--text);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      line-height: 1.45;
+    }
+    a { color: var(--brand-2); text-decoration: none; }
+    a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 10px; }
+    .sr-only {
+      position: absolute;
+      width: 1px; height: 1px; margin: -1px; overflow: hidden;
+      clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; padding: 0;
+    }
+
+    header.nav {
+      height: 68px; display: flex; align-items: center; justify-content: space-between;
+      padding: 0 18px; background: var(--surface); border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 30;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 900; font-size: 18px; letter-spacing: .2px; }
+    .badge {
+      width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center;
+      color: white; background: linear-gradient(180deg, var(--brand), var(--brand-2));
+      box-shadow: inset 0 1px 8px rgba(255,255,255,.25); font-weight: 900;
+    }
+    .segment { display: inline-flex; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+    .seg-btn { padding: 8px 16px; border: none; background: transparent; font-weight: 700; cursor: pointer; color: var(--text); transition: all .15s ease; }
+    .seg-btn[aria-pressed="true"] { background: #12233a; color: #e5e7eb; }
+    @media (prefers-color-scheme: light) { .seg-btn[aria-pressed="true"] { background: #e0f2fe; color: #0f172a; } }
+
+    .container { max-width: var(--container); margin: 28px auto; padding: 0 18px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 26px; }
+    .stack { display: grid; gap: var(--space); }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+    .title { font-size: clamp(22px, 3.2vw, 32px); font-weight: 900; margin: 0 0 8px; letter-spacing: .2px; }
+    .subtitle { color: var(--muted); margin: 0 0 18px; line-height: 1.5; }
+    .btn {
+      padding: 12px 18px; border-radius: 12px; border: 1px solid transparent;
+      background: linear-gradient(90deg, var(--brand), var(--brand-2));
+      color: #fff; font-weight: 800; cursor: pointer; box-shadow: 0 10px 26px rgba(37,99,235,.35);
+      transition: opacity .15s ease, transform .02s ease;
+    }
+    .btn:hover { opacity: .95; }
+    .btn:active { transform: translateY(1px); }
+    .btn[disabled] { opacity: .6; cursor: not-allowed; transform: none; }
+    .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); box-shadow: none; }
+    @media (prefers-color-scheme: light) { .btn.secondary { background: #f3f4f6; } }
+
+    .label { color: var(--muted); font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .input {
+      width: 100%; border: 1px solid var(--border); border-radius: 12px; background: #0f172a; padding: 12px 14px; font-size: 16px; color: var(--text);
+      transition: border-color .15s ease, background .15s ease;
+    }
+    @media (prefers-color-scheme: light) { .input { background: #ffffff; } }
+    .input:focus { border-color: var(--focus); outline: none; }
+    .hint { color: var(--muted); font-size: 13px; }
+    .error { color: var(--error); font-size: 13px; font-weight: 600; }
+    .success { color: var(--success); font-size: 13px; font-weight: 600; }
+
+    .field { position: relative; }
+    .affix {
+      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+      font-size: 12px; font-weight: 800; padding: 4px 8px; border-radius: 999px;
+      background: #e2fbe8; color: #166534; border: 1px solid #9ae6b4; display: none;
+    }
+    .field.valid .affix { display: inline-block; }
+
+    .progress { height: 14px; width: 100%; background: #1f2937; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+    @media (prefers-color-scheme: light) { .progress { background: #e5e7eb; } }
+    .bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--brand), var(--brand-2)); transition: width .2s linear; }
+
+    .otp { display: flex; gap: 10px; justify-content: center; margin: 12px 0; }
+    .otp input { 
+      width: 48px; height: 60px; text-align: center; font-size: 22px; font-weight: 700;
+      border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text);
+      transition: border-color .15s ease;
+    }
+    .otp input:focus { border-color: var(--brand); }
+
+    .plan {
+      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+      border: 1px dashed var(--border); border-radius: 12px; padding: 14px;
+      background: linear-gradient(180deg, rgba(59,130,246,.12), transparent 60%);
+    }
+    @media (prefers-color-scheme: light) { .plan { background: linear-gradient(180deg, rgba(59,130,246,.06), transparent 60%); } }
+    .price { font-weight: 900; font-size: 22px; }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      background: var(--success); color: white;
+    }
+    .status-badge.pending { background: var(--warning); }
+    .status-badge.error { background: var(--error); }
+
+    .pulse {
+      width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .5; }
+    }
+
+    .toast { 
+      position: fixed; right: 20px; bottom: 20px; background: #111827; color: white; 
+      padding: 12px 16px; border-radius: 12px; box-shadow: var(--shadow); 
+      display: none; z-index: 80; max-width: 320px;
+    }
+    .toast.show { display: block; animation: slideIn .3s ease; }
+    @keyframes slideIn {
+      from { transform: translateY(100px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    footer { text-align: center; color: var(--muted); font-size: 13px; margin: 18px 0; }
+
+    @media (max-width: 520px) {
+      header.nav { height: auto; padding: 12px; gap: 12px; flex-wrap: wrap; }
+      .brand { width: 100%; justify-content: space-between; }
+      .plan { grid-template-columns: 1fr; }
+      .otp input { width: 42px; height: 54px; }
+    }
+  </style>
+</head>
+<body>
+  <a class="sr-only" href="#main">Skip to content</a>
+
+  <header class="nav" role="banner" aria-label="Top navigation">
+    <div class="brand">
+      <div class="badge" aria-hidden="true">M</div>
+      Meri Perplexity
+      <div id="connection-status" style="margin-left: 12px; font-size: 12px; font-weight: 600;"></div>
+    </div>
+    <div id="role-toggle"></div>
+  </header>
+
+  <main id="main" class="container">
+    <div id="root"></div>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="text/babel">
+    const Roles = Object.freeze({ Buyer: 'buyer', Seller: 'seller' });
+    const BuyerStates = Object.freeze({
+      Offer: 'offer',
+      Checkout: 'checkout',
+      WaitingSeller: 'waiting_seller',
+      SellerAccepted: 'seller_accepted',
+      Processing: 'processing',
+      OtpSent: 'otp_sent',
+      OtpVerified: 'otp_verified',
+      Done: 'done'
+    });
+    const SellerStates = Object.freeze({
+      Idle: 'idle',
+      RequestReceived: 'request_received',
+      Working: 'working',
+      WaitingOtp: 'waiting_otp',
+      Complete: 'complete'
+    });
+
+    // ============================================
+    // PUBNUB CONFIGURATION
+    // ============================================
+    // TODO: Replace these with your actual PubNub keys from https://dashboard.pubnub.com
+    const PUBNUB_PUBLISH_KEY = 'pub-c-0a5e1e94-34fc-4f64-bbdc-6e4012c8b353';
+    const PUBNUB_SUBSCRIBE_KEY = 'sub-c-0270fce5-5c93-45a8-bd18-f3322aa354b3';
+    const CHANNEL_NAME = 'meri-perplexity-transactions';
+
+    // Initialize PubNub (only if keys are configured)
+    let pubnub = null;
+    if (PUBNUB_PUBLISH_KEY !== 'pub-c-0a5e1e94-34fc-4f64-bbdc-6e4012c8b353' && PUBNUB_SUBSCRIBE_KEY !== 'sub-c-0270fce5-5c93-45a8-bd18-f3322aa354b3') {
+      pubnub = new PubNub({
+        publishKey: PUBNUB_PUBLISH_KEY,
+        subscribeKey: PUBNUB_SUBSCRIBE_KEY,
+        userId: 'user-' + Math.random().toString(36).substring(7)
+      });
+    }
+
+    const AppContext = React.createContext();
+
+    function generateOtp() {
+      return Math.floor(100000 + Math.random() * 900000).toString();
+    }
+
+    function maskEmail(email) {
+      if (!email || !email.includes('@')) return email;
+      const [name, domain] = email.split('@');
+      const masked = name.slice(0, 2) + '***' + name.slice(-1);
+      return masked + '@' + domain;
+    }
+
+    function validateEmail(email) {
+      const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return re.test(email);
+    }
+
+    function validateCard(card) {
+      const digits = card.replace(/\s/g, '');
+      return /^\d{13,19}$/.test(digits);
+    }
+
+    function reducer(state, action) {
+      switch (action.type) {
+        case 'SWITCH_ROLE':
+          return { ...state, role: action.role };
+
+        case 'SET_BUYER_EMAIL':
+          return { ...state, buyer: { ...state.buyer, email: action.email } };
+
+        case 'SET_BUYER_CARD':
+          return { ...state, buyer: { ...state.buyer, card: action.card } };
+
+        case 'BUYER_CHECKOUT':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.Checkout,
+              touched: { email: true, card: true }
+            }
+          };
+
+        case 'BUYER_SUBMIT_PAYMENT':
+          // Real-time: Immediately notify seller
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.WaitingSeller,
+              queuePos: 1,
+              progress: 0,
+              requestTime: Date.now()
+            },
+            seller: {
+              ...state.seller,
+              state: SellerStates.RequestReceived,
+              hasRequest: true,
+              buyerEmail: state.buyer.email,
+              requestTime: Date.now()
+            }
+          };
+
+        case 'SELLER_ACCEPT_REQUEST':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.SellerAccepted,
+              progress: 25
+            },
+            seller: {
+              ...state.seller,
+              state: SellerStates.Working,
+              acceptedTime: Date.now()
+            }
+          };
+
+        case 'SELLER_START_REDEMPTION':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.Processing,
+              progress: 50
+            },
+            seller: {
+              ...state.seller,
+              state: SellerStates.Working
+            }
+          };
+
+        case 'SEND_OTP':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.OtpSent,
+              otp: action.otp,
+              otpEntered: '',
+              progress: 75
+            },
+            seller: {
+              ...state.seller,
+              state: SellerStates.WaitingOtp
+            }
+          };
+
+        case 'BUYER_ENTER_OTP':
+          return {
+            ...state,
+            buyer: { ...state.buyer, otpEntered: action.value }
+          };
+
+        case 'BUYER_OTP_VERIFIED':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.OtpVerified,
+              progress: 90
+            }
+          };
+
+        case 'BUYER_SHARE_OTP':
+          return {
+            ...state,
+            seller: {
+              ...state.seller,
+              hasOtp: true,
+              receivedOtp: state.buyer.otpEntered
+            }
+          };
+
+        case 'SELLER_COMPLETE':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              state: BuyerStates.Done,
+              progress: 100,
+              completedTime: Date.now()
+            },
+            seller: {
+              ...state.seller,
+              state: SellerStates.Complete,
+              completedTime: Date.now()
+            }
+          };
+
+        case 'BLUR_FIELD':
+          return {
+            ...state,
+            buyer: {
+              ...state.buyer,
+              touched: { ...state.buyer.touched, [action.field]: true }
+            }
+          };
+
+        case 'RESET_DEMO':
+          return {
+            role: Roles.Buyer,
+            buyer: {
+              state: BuyerStates.Offer,
+              email: '',
+              card: '',
+              otp: null,
+              otpEntered: '',
+              touched: {},
+              queuePos: 0,
+              progress: 0
+            },
+            seller: {
+              state: SellerStates.Idle,
+              hasRequest: false,
+              hasOtp: false,
+              buyerEmail: '',
+              receivedOtp: ''
+            }
+          };
+
+        default:
+          return state;
+      }
+    }
+
+    function App() {
+      const initialState = {
+        role: Roles.Buyer,
+        buyer: {
+          state: BuyerStates.Offer,
+          email: '',
+          card: '',
+          otp: null,
+          otpEntered: '',
+          touched: {},
+          queuePos: 0,
+          progress: 0
+        },
+        seller: {
+          state: SellerStates.Idle,
+          hasRequest: false,
+          hasOtp: false,
+          buyerEmail: '',
+          receivedOtp: ''
+        }
+      };
+
+      const [state, baseDispatch] = React.useReducer(reducer, initialState);
+
+      // Enhanced dispatch that also publishes to PubNub
+      const dispatch = React.useCallback((action) => {
+        // Dispatch locally first
+        baseDispatch(action);
+
+        // Then broadcast to other users (if PubNub is configured)
+        if (pubnub && action.type !== 'SWITCH_ROLE' && action.type !== 'RESET_DEMO') {
+          pubnub.publish({
+            channel: CHANNEL_NAME,
+            message: action
+          }).catch(err => console.error('PubNub publish error:', err));
+        }
+      }, []);
+
+      const toast = React.useMemo(() => ({
+        show(message, duration = 3000) {
+          const el = document.getElementById('toast');
+          el.textContent = message;
+          el.classList.add('show');
+          setTimeout(() => el.classList.remove('show'), duration);
+        }
+      }), []);
+
+      // ============================================
+      // PUBNUB REAL-TIME SYNC
+      // ============================================
+      React.useEffect(() => {
+        const statusEl = document.getElementById('connection-status');
+        
+        if (!pubnub) {
+          statusEl.innerHTML = '<span style="color: #f59e0b;">⚠️ Demo Mode (Add PubNub keys for real-time)</span>';
+          return;
+        }
+
+        statusEl.innerHTML = '<span style="color: #16a34a;">🟢 Connected</span>';
+
+        // Subscribe to the transaction channel
+        pubnub.subscribe({ channels: [CHANNEL_NAME] });
+
+        // Listen for incoming messages
+        const listener = {
+          message: (event) => {
+            // Receive state updates from other users
+            if (event.message && event.message.type) {
+              dispatch(event.message);
+            }
+          },
+          status: (statusEvent) => {
+            if (statusEvent.category === 'PNConnectedCategory') {
+              statusEl.innerHTML = '<span style="color: #16a34a;">🟢 Connected</span>';
+            } else if (statusEvent.category === 'PNNetworkDownCategory') {
+              statusEl.innerHTML = '<span style="color: #dc2626;">🔴 Disconnected</span>';
+            }
+          }
+        };
+
+        pubnub.addListener(listener);
+
+        // Cleanup on unmount
+        return () => {
+          pubnub.removeListener(listener);
+          pubnub.unsubscribe({ channels: [CHANNEL_NAME] });
+        };
+      }, []);
+
+      // Publish state changes to PubNub
+      React.useEffect(() => {
+        // Don't sync role changes or initial state
+        if (!pubnub) return;
+        
+        // Publish significant state changes to other users
+        // This happens automatically when dispatch is called
+      }, [state]);
+
+      // Simulate progress for waiting states
+      React.useEffect(() => {
+        if (state.buyer.state === BuyerStates.WaitingSeller) {
+          const interval = setInterval(() => {
+            dispatch({ type: 'UPDATE_PROGRESS' });
+          }, 500);
+          return () => clearInterval(interval);
+        }
+      }, [state.buyer.state]);
+
+      return (
+        <AppContext.Provider value={{ state, dispatch, toast }}>
+          <RoleToggle />
+          {state.role === Roles.Buyer ? <Buyer /> : <Seller />}
+        </AppContext.Provider>
+      );
+    }
+
+    function RoleToggle() {
+      const { state, dispatch } = React.useContext(AppContext);
+      return ReactDOM.createPortal(
+        <div className="segment" role="group" aria-label="User role selector">
+          <button
+            className="seg-btn"
+            aria-pressed={state.role === Roles.Buyer}
+            onClick={() => dispatch({ type: 'SWITCH_ROLE', role: Roles.Buyer })}
+            type="button"
+          >
+            Buyer
+          </button>
+          <button
+            className="seg-btn"
+            aria-pressed={state.role === Roles.Seller}
+            onClick={() => dispatch({ type: 'SWITCH_ROLE', role: Roles.Seller })}
+            type="button"
+          >
+            Seller
+          </button>
+        </div>,
+        document.getElementById('role-toggle')
+      );
+    }
+
+    function Buyer() {
+      const { state } = React.useContext(AppContext);
+      const buyerState = state.buyer.state;
+
+      if (buyerState === BuyerStates.Offer) return <BuyerOffer />;
+      if (buyerState === BuyerStates.Checkout) return <BuyerCheckout />;
+      if (buyerState === BuyerStates.WaitingSeller) return <BuyerWaitingSeller />;
+      if (buyerState === BuyerStates.SellerAccepted) return <BuyerSellerAccepted />;
+      if (buyerState === BuyerStates.Processing) return <BuyerProcessing />;
+      if (buyerState === BuyerStates.OtpSent || buyerState === BuyerStates.OtpVerified) return <BuyerVerify />;
+      if (buyerState === BuyerStates.Done) return <BuyerDone />;
+      return null;
+    }
+
+    function BuyerOffer() {
+      const { dispatch } = React.useContext(AppContext);
+      return (
+        <section className="card" aria-labelledby="offer-title">
+          <h2 id="offer-title" className="title">Get Perplexity Pro for one year</h2>
+          <p className="subtitle">
+            Access premium features through our verified seller marketplace. 
+            Safe, secure, and instant activation.
+          </p>
+          <div className="plan">
+            <div>
+              <strong>Perplexity Pro Annual</strong>
+              <div className="hint">Unlimited searches, advanced AI models, API access</div>
+            </div>
+            <div className="price">$100</div>
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <button
+              className="btn"
+              onClick={() => dispatch({ type: 'BUYER_CHECKOUT' })}
+              type="button"
+            >
+              Continue to checkout
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    function Field({ id, label, value, onChange, onBlur, placeholder, type = 'text', autoComplete, hint, error, isValid }) {
+      return (
+        <div className={`field ${isValid ? 'valid' : ''}`}>
+          <label className="label" htmlFor={id}>{label}</label>
+          <input
+            id={id}
+            className="input"
+            type={type}
+            value={value}
+            onChange={onChange}
+            onBlur={onBlur}
+            placeholder={placeholder}
+            autoComplete={autoComplete}
+            aria-invalid={!!error}
+            aria-describedby={error ? `${id}-error` : hint ? `${id}-hint` : undefined}
+          />
+          {isValid && <span className="affix">✓</span>}
+          {error && <div id={`${id}-error`} className="error">{error}</div>}
+          {!error && hint && <div id={`${id}-hint`} className="hint">{hint}</div>}
+        </div>
+      );
+    }
+
+    function BuyerCheckout() {
+      const { state, dispatch } = React.useContext(AppContext);
+      const { email, card, touched } = state.buyer;
+
+      const validEmail = validateEmail(email);
+      const validCard = validateCard(card);
+      const canPay = validEmail && validCard;
+
+      function onEmailChange(e) {
+        dispatch({ type: 'SET_BUYER_EMAIL', email: e.target.value });
+      }
+
+      function onCardChange(e) {
+        let val = e.target.value.replace(/\s/g, '');
+        val = val.replace(/(\d{4})/g, '$1 ').trim();
+        dispatch({ type: 'SET_BUYER_CARD', card: val });
+      }
+
+      function onBlur(field) {
+        dispatch({ type: 'BLUR_FIELD', field });
+      }
+
+      function emailError() {
+        if (!touched.email) return '';
+        return validEmail ? '' : 'Please enter a valid email address';
+      }
+
+      function cardError() {
+        if (!touched.card) return '';
+        return validCard ? '' : 'Please enter a valid card number (13-19 digits)';
+      }
+
+      function onSubmit(e) {
+        e.preventDefault();
+        if (!canPay) return;
+        dispatch({ type: 'BUYER_SUBMIT_PAYMENT' });
+      }
+
+      return (
+        <form onSubmit={onSubmit} aria-labelledby="checkout-title">
+          <div className="card stack">
+            <h2 id="checkout-title" className="title">Complete your purchase</h2>
+            <p className="subtitle">Enter your details to activate Perplexity Pro. A seller will be notified in real-time.</p>
+            
+            <div className="plan">
+              <div>
+                <strong>Perplexity Pro Annual</strong>
+              </div>
+              <div className="price">$100</div>
+            </div>
+
+            <Field
+              id="email"
+              label="Email address"
+              value={email}
+              onChange={onEmailChange}
+              onBlur={() => onBlur('email')}
+              placeholder="you@example.com"
+              type="email"
+              autoComplete="email"
+              hint="This email will be used for your Perplexity Pro account"
+              error={emailError()}
+              isValid={touched.email && validEmail}
+            />
+            
+            <Field
+              id="card"
+              label="Card number"
+              value={card}
+              onChange={onCardChange}
+              onBlur={() => onBlur('card')}
+              placeholder="4242 4242 4242 4242"
+              type="tel"
+              autoComplete="cc-number"
+              hint="Demo only • No charges will be made"
+              error={cardError()}
+              isValid={touched.card && validCard}
+            />
+            
+            <div className="row">
+              <button className="btn" type="submit" disabled={!canPay}>
+                Pay $100 and request activation
+              </button>
+              <span className="hint">Secure checkout • Instant activation</span>
+            </div>
+          </div>
+        </form>
+      );
+    }
+
+    function BuyerWaitingSeller() {
+      const { state } = React.useContext(AppContext);
+      return (
+        <section className="card" aria-busy="true" aria-labelledby="waiting-title">
+          <h2 id="waiting-title" className="title">Finding available seller</h2>
+          <p className="subtitle">
+            Your request has been sent in real-time. A seller will accept shortly.
+          </p>
+          
+          <div className="row" style={{ marginBottom: 12 }}>
+            <div className="status-badge pending">
+              <div className="pulse"></div>
+              Waiting for seller
+            </div>
+          </div>
+
+          <div className="row" aria-live="polite">
+            <div className="hint">Queue position: {state.buyer.queuePos}</div>
+            <div className="hint">Average wait: 20-30 seconds</div>
+          </div>
+          
+          <div className="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={state.buyer.progress} style={{ marginTop: 10 }}>
+            <div className="bar" style={{ width: state.buyer.progress + '%' }}></div>
+          </div>
+        </section>
+      );
+    }
+
+    function BuyerSellerAccepted() {
+      const { state } = React.useContext(AppContext);
+      return (
+        <section className="card" aria-busy="true" aria-labelledby="accepted-title">
+          <h2 id="accepted-title" className="title">Seller accepted your request</h2>
+          <p className="subtitle">
+            The seller is now setting up your Perplexity Pro account.
+          </p>
+          
+          <div className="row" style={{ marginBottom: 12 }}>
+            <div className="status-badge">
+              <div className="pulse"></div>
+              In progress
+            </div>
+          </div>
+
+          <div className="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={state.buyer.progress} style={{ marginTop: 10 }}>
+            <div className="bar" style={{ width: state.buyer.progress + '%' }}></div>
+          </div>
+          
+          <p className="hint" style={{ marginTop: 12 }}>This usually takes 30-60 seconds</p>
+        </section>
+      );
+    }
+
+    function BuyerProcessing() {
+      const { state } = React.useContext(AppContext);
+      return (
+        <section className="card" aria-busy="true" aria-labelledby="processing-title">
+          <h2 id="processing-title" className="title">Almost there</h2>
+          <p className="subtitle">
+            Setting up your account. We'll send you a verification code shortly.
+          </p>
+          
+          <div className="row" style={{ marginBottom: 12 }}>
+            <div className="status-badge">
+              <div className="pulse"></div>
+              Processing
+            </div>
+          </div>
+
+          <div className="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={state.buyer.progress} style={{ marginTop: 10 }}>
+            <div className="bar" style={{ width: state.buyer.progress + '%' }}></div>
+          </div>
+        </section>
+      );
+    }
+
+    function OTPInputs({ onChange }) {
+      const [values, setValues] = React.useState(['', '', '', '', '', '']);
+      const inputRefs = React.useRef([]);
+
+      function handleChange(index, value) {
+        if (!/^\d*$/.test(value)) return;
+        
+        const newValues = [...values];
+        newValues[index] = value.slice(-1);
+        setValues(newValues);
+        onChange(newValues.join(''));
+
+        if (value && index < 5) {
+          inputRefs.current[index + 1]?.focus();
+        }
+      }
+
+      function handleKeyDown(index, e) {
+        if (e.key === 'Backspace' && !values[index] && index > 0) {
+          inputRefs.current[index - 1]?.focus();
+        }
+      }
+
+      function handlePaste(e) {
+        e.preventDefault();
+        const paste = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+        const newValues = paste.split('').concat(Array(6).fill('')).slice(0, 6);
+        setValues(newValues);
+        onChange(newValues.join(''));
+        inputRefs.current[Math.min(paste.length, 5)]?.focus();
+      }
+
+      return (
+        <div className="otp" role="group" aria-label="One time password input">
+          {values.map((val, idx) => (
+            <input
+              key={idx}
+              ref={el => inputRefs.current[idx] = el}
+              type="text"
+              inputMode="numeric"
+              maxLength="1"
+              value={val}
+              onChange={e => handleChange(idx, e.target.value)}
+              onKeyDown={e => handleKeyDown(idx, e)}
+              onPaste={idx === 0 ? handlePaste : undefined}
+              aria-label={`Digit ${idx + 1}`}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    function BuyerVerify() {
+      const { state, dispatch, toast } = React.useContext(AppContext);
+      const entered = state.buyer.otpEntered;
+
+      function handleCodeChange(value) {
+        dispatch({ type: 'BUYER_ENTER_OTP', value: value });
+        
+        // Auto-share when code is complete (6 digits)
+        if (value.length === 6) {
+          setTimeout(() => {
+            dispatch({ type: 'BUYER_SHARE_OTP' });
+            toast.show('✓ Code automatically shared with seller');
+          }, 300);
+        }
+      }
+
+      return (
+        <section className="card" aria-labelledby="verify-title">
+          <h2 id="verify-title" className="title">Enter confirmation code</h2>
+          <p className="subtitle">
+            <strong>Important:</strong> Perplexity will send a confirmation code to <strong>{state.buyer.email}</strong>. 
+            We did not send this code - it comes directly from Perplexity.
+          </p>
+
+          <div className="card" style={{ marginTop: 12, marginBottom: 16, background: 'rgba(59,130,246,.05)' }}>
+            <p className="hint" style={{ margin: 0 }}>
+              Check your email for a message from Perplexity with your 6-digit confirmation code.
+            </p>
+          </div>
+
+          <OTPInputs onChange={handleCodeChange} value={entered} />
+          
+          {entered.length === 6 && (
+            <div className="success" style={{ textAlign: 'center', marginTop: 12 }}>
+              ✓ Code shared with seller
+            </div>
+          )}
+
+          <div className="row" style={{ justifyContent: 'center', marginTop: 16 }}>
+            <div className="status-badge pending">
+              <div className="pulse"></div>
+              Waiting for seller to complete
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    function BuyerDone() {
+      const { state, dispatch } = React.useContext(AppContext);
+      return (
+        <section className="card" aria-labelledby="done-title" style={{ background: 'linear-gradient(180deg, rgba(22,163,74,.12), transparent)' }}>
+          <h2 id="done-title" className="title">🎉 Activation complete!</h2>
+          <p className="subtitle">
+            Perplexity Pro is now active for <strong>{state.buyer.email}</strong>
+          </p>
+          
+          <div className="card" style={{ marginTop: 12 }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700 }}>What's included:</h3>
+            <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
+              <li>Unlimited AI-powered searches</li>
+              <li>Access to GPT-4, Claude, and other advanced models</li>
+              <li>File upload and analysis</li>
+              <li>API access for developers</li>
+              <li>Priority support</li>
+            </ul>
+          </div>
+
+          <div className="row" style={{ marginTop: 16 }}>
+            <button className="btn" onClick={() => dispatch({ type: 'RESET_DEMO' })} type="button">
+              Start new demo
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    function Seller() {
+      const { state } = React.useContext(AppContext);
+      const sellerState = state.seller.state;
+
+      if (sellerState === SellerStates.Idle) return <SellerIdle />;
+      if (sellerState === SellerStates.RequestReceived) return <SellerRequestReceived />;
+      if (sellerState === SellerStates.Working) return <SellerWorking />;
+      if (sellerState === SellerStates.WaitingOtp) return <SellerWaitingOtp />;
+      if (sellerState === SellerStates.Complete) return <SellerComplete />;
+      return <SellerIdle />;
+    }
+
+    function SellerIdle() {
+      return (
+        <section className="card" aria-labelledby="seller-title">
+          <h2 id="seller-title" className="title">Seller dashboard</h2>
+          <p className="subtitle">Waiting for buyer requests...</p>
+          
+          <div className="card" style={{ marginTop: 12, background: 'rgba(59,130,246,.05)' }}>
+            <p className="hint">Switch to Buyer view to simulate a purchase request</p>
+          </div>
+        </section>
+      );
+    }
+
+    function SellerRequestReceived() {
+      const { state, dispatch, toast } = React.useContext(AppContext);
+      
+      function acceptRequest() {
+        dispatch({ type: 'SELLER_ACCEPT_REQUEST' });
+        toast.show('✓ Request accepted');
+      }
+
+      return (
+        <section className="card" aria-labelledby="seller-request-title">
+          <h2 id="seller-request-title" className="title">New activation request</h2>
+          <p className="subtitle">A buyer is ready to purchase Perplexity Pro</p>
+
+          <div className="row" style={{ marginBottom: 16 }}>
+            <div className="status-badge pending">
+              <div className="pulse"></div>
+              Pending acceptance
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="label">Buyer email</div>
+            <input 
+              className="input" 
+              value={maskEmail(state.seller.buyerEmail)} 
+              readOnly 
+              aria-readonly="true"
+              style={{ marginTop: 6 }}
+            />
+            
+            <div className="label" style={{ marginTop: 12 }}>Your earning</div>
+            <div className="price" style={{ marginTop: 6 }}>₹4,500</div>
+          </div>
+
+          <div className="row" style={{ marginTop: 16 }}>
+            <button className="btn" onClick={acceptRequest} type="button">
+              Accept and start redemption
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    function SellerWorking() {
+      const { state, dispatch, toast } = React.useContext(AppContext);
+
+      function startRedemption() {
+        dispatch({ type: 'SELLER_START_REDEMPTION' });
+        toast.show('Redemption started');
+      }
+
+      function sendOtp() {
+        const otp = generateOtp();
+        dispatch({ type: 'SEND_OTP', otp });
+        toast.show('✓ Verification code sent to buyer');
+      }
+
+      return (
+        <section className="card" aria-labelledby="seller-working-title">
+          <h2 id="seller-working-title" className="title">Airtel Thanks redemption</h2>
+          <p className="subtitle">Complete the activation process in Airtel app</p>
+
+          <div className="row" style={{ marginBottom: 16 }}>
+            <div className="status-badge">
+              <div className="pulse"></div>
+              In progress
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="label">Buyer email to use</div>
+            <input 
+              className="input" 
+              value={state.seller.buyerEmail} 
+              readOnly 
+              aria-readonly="true"
+              style={{ marginTop: 6 }}
+            />
+          </div>
+
+          <div className="stack" style={{ marginTop: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Steps:</h3>
+            <ol className="stack" style={{ paddingLeft: 20, margin: 0 }}>
+              <li>Open My Airtel app</li>
+              <li>Navigate to Airtel Thanks section</li>
+              <li>Select Perplexity Pro offer</li>
+              <li>Enter the buyer's email: <strong>{state.seller.buyerEmail}</strong></li>
+              <li>Complete the redemption</li>
+            </ol>
+          </div>
+
+          <div className="row" style={{ marginTop: 16 }}>
+            <button className="btn" onClick={sendOtp} type="button">
+              Redemption complete • Send OTP
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    function SellerWaitingOtp() {
+      const { state } = React.useContext(AppContext);
+      
+      return (
+        <section className="card" aria-labelledby="seller-waiting-title">
+          <h2 id="seller-waiting-title" className="title">Waiting for buyer verification</h2>
+          <p className="subtitle">The buyer needs to verify their email and share the code with you</p>
+
+          <div className="row" style={{ marginBottom: 16 }}>
+            <div className="status-badge pending">
+              <div className="pulse"></div>
+              Waiting for OTP
+            </div>
+          </div>
+
+          {state.seller.hasOtp && <SellerEnterOtp />}
+        </section>
+      );
+    }
+
+    function SellerEnterOtp() {
+      const { state, dispatch, toast } = React.useContext(AppContext);
+      const code = state.seller.receivedOtp || '------';
+
+      function complete() {
+        dispatch({ type: 'SELLER_COMPLETE' });
+        toast.show('✓ Activation completed successfully');
+      }
+
+      return (
+        <div className="card" style={{ marginTop: 16, background: 'linear-gradient(180deg, rgba(59,130,246,.1), transparent)' }}>
+          <div className="label">Confirmation code from buyer</div>
+          <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: 4, marginTop: 8, marginBottom: 16 }}>
+            {code}
+          </div>
+          
+          <p className="subtitle">Enter this code in the My Airtel app to complete activation</p>
+          
+          <div className="row">
+            <button className="btn" onClick={complete} type="button">
+              Confirm activation complete
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    function SellerComplete() {
+      const { state, dispatch } = React.useContext(AppContext);
+      
+      return (
+        <section className="card" aria-labelledby="seller-complete-title" style={{ background: 'linear-gradient(180deg, rgba(22,163,74,.12), transparent)' }}>
+          <h2 id="seller-complete-title" className="title">✓ Activation complete</h2>
+          <p className="subtitle">
+            Successfully activated Perplexity Pro for <strong>{state.seller.buyerEmail}</strong>
+          </p>
+
+          <div className="card" style={{ marginTop: 12 }}>
+            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="label">Transaction summary</div>
+                <div style={{ marginTop: 8 }}>
+                  <div><strong>Buyer paid:</strong> $100</div>
+                  <div><strong>Your earning:</strong> ₹4,500</div>
+                  <div><strong>Status:</strong> <span className="success">Completed</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 16 }}>
+            <button className="btn secondary" onClick={() => dispatch({ type: 'RESET_DEMO' })} type="button">
+              Ready for next request
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
