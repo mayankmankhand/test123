@@ -229,11 +229,17 @@
     const PUBNUB_PUBLISH_KEY = 'pub-c-0a5e1e94-34fc-4f64-bbdc-6e4012c8b353';
     const PUBNUB_SUBSCRIBE_KEY = 'sub-c-0270fce5-5c93-45a8-bd18-f3322aa354b3';
     const CHANNEL_NAME = 'meri-perplexity-transactions';
+    const STATE_CHANNEL = 'meri-perplexity-state'; // For broadcasting active requests
 
     // Generate unique user ID for this session with timestamp for extra uniqueness
     const USER_ID = 'user-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
     
     console.log('[PubNub] My USER_ID:', USER_ID);
+    
+    // Generate unique transaction ID
+    function generateTransactionId() {
+      return 'txn-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+    }
 
     // Initialize PubNub (only if keys are configured)
     let pubnub = null;
@@ -291,9 +297,12 @@
           };
 
         case 'BUYER_SUBMIT_PAYMENT':
-          // Real-time: Immediately notify seller
-          // Email comes from action.buyerEmail (from remote) or state.buyer.email (local)
+          // Create a unique transaction ID for this request
+          const transactionId = action.transactionId || generateTransactionId();
           const buyerEmail = action.buyerEmail || state.buyer.email;
+          
+          console.log('[Transaction] Created transaction:', transactionId, 'for buyer:', buyerEmail);
+          
           return {
             ...state,
             buyer: {
@@ -301,14 +310,40 @@
               state: BuyerStates.WaitingSeller,
               queuePos: 1,
               progress: 0,
-              requestTime: Date.now()
+              requestTime: Date.now(),
+              transactionId: transactionId
             },
+            seller: {
+              ...state.seller,
+              // Add to pending requests if seller is viewing
+              pendingRequests: state.role === Roles.Seller 
+                ? [...state.seller.pendingRequests, { transactionId, buyerEmail, timestamp: Date.now() }]
+                : state.seller.pendingRequests
+            }
+          };
+
+        case 'SELLER_CLAIM_REQUEST':
+          // Seller claims a specific transaction
+          const claimedRequest = state.seller.pendingRequests.find(
+            req => req.transactionId === action.transactionId
+          );
+          
+          if (!claimedRequest) {
+            console.warn('[Transaction] Request not found:', action.transactionId);
+            return state;
+          }
+          
+          console.log('[Transaction] Seller claiming transaction:', action.transactionId);
+          
+          return {
+            ...state,
             seller: {
               ...state.seller,
               state: SellerStates.RequestReceived,
               hasRequest: true,
-              buyerEmail: buyerEmail,
-              requestTime: Date.now()
+              buyerEmail: claimedRequest.buyerEmail,
+              claimedTransactionId: action.transactionId,
+              requestTime: claimedRequest.timestamp
             }
           };
 
@@ -452,14 +487,17 @@
           otpEntered: '',
           touched: {},
           queuePos: 0,
-          progress: 0
+          progress: 0,
+          transactionId: null
         },
         seller: {
           state: SellerStates.Idle,
           hasRequest: false,
           hasOtp: false,
           buyerEmail: '',
-          receivedOtp: ''
+          receivedOtp: '',
+          claimedTransactionId: null, // Which transaction this seller is handling
+          pendingRequests: [] // List of all pending buyer requests
         }
       };
 
@@ -487,6 +525,7 @@
         // List of actions that should be broadcast to other users
         const broadcastableActions = [
           'BUYER_SUBMIT_PAYMENT',
+          'SELLER_CLAIM_REQUEST',
           'SELLER_ACCEPT_REQUEST',
           'SELLER_START_REDEMPTION',
           'SEND_OTP',
@@ -509,10 +548,13 @@
             delete sanitizedAction.card;
           }
           
-          // For BUYER_SUBMIT_PAYMENT, include the buyer's email
+          // For BUYER_SUBMIT_PAYMENT, include the buyer's email and transaction ID
           if (action.type === 'BUYER_SUBMIT_PAYMENT' && emailToSend) {
+            const transactionId = state.buyer.transactionId || generateTransactionId();
             sanitizedAction.buyerEmail = emailToSend;
+            sanitizedAction.transactionId = transactionId;
             console.log('[PubNub] Including buyer email in message:', sanitizedAction.buyerEmail);
+            console.log('[PubNub] Including transaction ID:', transactionId);
           }
           
           // For BUYER_SHARE_OTP, include the OTP
@@ -581,7 +623,7 @@
               const sellerActions = ['BUYER_SUBMIT_PAYMENT', 'BUYER_SHARE_OTP'];
               
               // Actions that buyers should receive (from sellers)
-              const buyerActions = ['SELLER_ACCEPT_REQUEST', 'SELLER_START_REDEMPTION', 'SEND_OTP', 'SELLER_COMPLETE'];
+              const buyerActions = ['SELLER_CLAIM_REQUEST', 'SELLER_ACCEPT_REQUEST', 'SELLER_START_REDEMPTION', 'SEND_OTP', 'SELLER_COMPLETE'];
               
               // Only apply actions relevant to current role
               if (currentRole === Roles.Seller && sellerActions.includes(action.type)) {
@@ -622,6 +664,64 @@
           pubnub.unsubscribe({ channels: [CHANNEL_NAME] });
         };
       }, [state.role]);
+
+      // When seller joins, announce presence to request pending transactions
+      React.useEffect(() => {
+        if (!pubnub || state.role !== Roles.Seller) return;
+        
+        console.log('[Seller] Announcing seller presence - requesting pending transactions');
+        
+        // Broadcast that a new seller has joined and is ready to receive requests
+        pubnub.publish({
+          channel: CHANNEL_NAME,
+          message: {
+            type: 'SELLER_JOINED',
+            senderId: USER_ID,
+            timestamp: Date.now()
+          }
+        }).then(() => {
+          console.log('[Seller] Presence announced successfully');
+        }).catch(err => {
+          console.error('[Seller] Error announcing presence:', err);
+        });
+      }, [state.role]);
+
+      // Buyers re-broadcast their pending request when a seller joins
+      React.useEffect(() => {
+        if (!pubnub) return;
+
+        const listener = {
+          message: (event) => {
+            if (event.message && event.message.type === 'SELLER_JOINED') {
+              // A new seller joined - if we're a buyer with pending request, re-broadcast it
+              if (state.role === Roles.Buyer && 
+                  state.buyer.state === BuyerStates.WaitingSeller && 
+                  state.buyer.transactionId) {
+                
+                console.log('[Buyer] Seller joined - re-broadcasting my pending request');
+                
+                setTimeout(() => {
+                  pubnub.publish({
+                    channel: CHANNEL_NAME,
+                    message: {
+                      type: 'BUYER_SUBMIT_PAYMENT',
+                      senderId: USER_ID,
+                      buyerEmail: state.buyer.email,
+                      transactionId: state.buyer.transactionId,
+                      timestamp: state.buyer.requestTime
+                    }
+                  }).then(() => {
+                    console.log('[Buyer] Re-broadcasted pending request to new seller');
+                  });
+                }, 100); // Small delay to let seller finish subscribing
+              }
+            }
+          }
+        };
+
+        pubnub.addListener(listener);
+        return () => pubnub.removeListener(listener);
+      }, [state.role, state.buyer.state, state.buyer.transactionId, state.buyer.email, state.buyer.requestTime]);
 
       // Publish state changes to PubNub
       React.useEffect(() => {
@@ -1049,14 +1149,61 @@
     }
 
     function SellerIdle() {
+      const { state, dispatch } = React.useContext(AppContext);
+      const pendingRequests = state.seller.pendingRequests || [];
+      
+      function claimRequest(transactionId) {
+        console.log('[Seller] Claiming request:', transactionId);
+        dispatch({ type: 'SELLER_CLAIM_REQUEST', transactionId });
+      }
+      
       return (
         <section className="card" aria-labelledby="seller-title">
           <h2 id="seller-title" className="title">Seller dashboard</h2>
-          <p className="subtitle">Waiting for buyer requests...</p>
           
-          <div className="card" style={{ marginTop: 12, background: 'rgba(59,130,246,.05)' }}>
-            <p className="hint">Switch to Buyer view to simulate a purchase request</p>
-          </div>
+          {pendingRequests.length === 0 ? (
+            <>
+              <p className="subtitle">Waiting for buyer requests...</p>
+              <div className="card" style={{ marginTop: 12, background: 'rgba(59,130,246,.05)' }}>
+                <p className="hint">When a buyer submits a payment, you'll see their request here</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="subtitle">{pendingRequests.length} pending {pendingRequests.length === 1 ? 'request' : 'requests'}</p>
+              
+              <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {pendingRequests.map((request, index) => (
+                  <div key={request.transactionId} className="card" style={{ padding: '16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                      <div>
+                        <div className="label">Request #{index + 1}</div>
+                        <div style={{ fontSize: 14, marginTop: 4 }}>
+                          {maskEmail(request.buyerEmail)}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>
+                          {new Date(request.timestamp).toLocaleTimeString()}
+                        </div>
+                      </div>
+                      <div className="status-badge pending">
+                        <div className="pulse"></div>
+                        Pending
+                      </div>
+                    </div>
+                    
+                    <button 
+                      className="btn" 
+                      onClick={() => claimRequest(request.transactionId)}
+                      type="button"
+                      style={{ width: '100%' }}
+                    >
+                      Accept Request
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </section>
       );
     }
