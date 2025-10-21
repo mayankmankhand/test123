@@ -456,11 +456,29 @@
         // Dispatch locally first
         baseDispatch(action);
 
-        // Then broadcast to other users (if PubNub is configured)
-        if (pubnub && action.type !== 'SWITCH_ROLE' && action.type !== 'RESET_DEMO') {
+        // List of actions that should be broadcast to other users
+        const broadcastableActions = [
+          'BUYER_SUBMIT_PAYMENT',
+          'SELLER_ACCEPT_REQUEST',
+          'SELLER_START_REDEMPTION',
+          'SEND_OTP',
+          'BUYER_SHARE_OTP',
+          'SELLER_COMPLETE'
+        ];
+
+        // Only broadcast important transaction events, NOT form inputs
+        if (pubnub && broadcastableActions.includes(action.type)) {
+          // Create a sanitized action (remove sensitive data)
+          const sanitizedAction = { ...action };
+          
+          // Never broadcast credit card info
+          if (sanitizedAction.card) {
+            delete sanitizedAction.card;
+          }
+          
           pubnub.publish({
             channel: CHANNEL_NAME,
-            message: action
+            message: sanitizedAction
           }).catch(err => console.error('PubNub publish error:', err));
         }
       }, []);
