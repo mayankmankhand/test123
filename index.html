@@ -230,13 +230,16 @@
     const PUBNUB_SUBSCRIBE_KEY = 'sub-c-0270fce5-5c93-45a8-bd18-f3322aa354b3';
     const CHANNEL_NAME = 'meri-perplexity-transactions';
 
+    // Generate unique user ID for this session
+    const USER_ID = 'user-' + Math.random().toString(36).substring(7);
+
     // Initialize PubNub (only if keys are configured)
     let pubnub = null;
     if (PUBNUB_PUBLISH_KEY !== 'YOUR_PUBLISH_KEY_HERE' && PUBNUB_SUBSCRIBE_KEY !== 'YOUR_SUBSCRIBE_KEY_HERE') {
       pubnub = new PubNub({
         publishKey: PUBNUB_PUBLISH_KEY,
         subscribeKey: PUBNUB_SUBSCRIBE_KEY,
-        userId: 'user-' + Math.random().toString(36).substring(7)
+        userId: USER_ID
       });
     }
 
@@ -286,6 +289,8 @@
 
         case 'BUYER_SUBMIT_PAYMENT':
           // Real-time: Immediately notify seller
+          // Email comes from action.buyerEmail (from remote) or state.buyer.email (local)
+          const buyerEmail = action.buyerEmail || state.buyer.email;
           return {
             ...state,
             buyer: {
@@ -299,7 +304,7 @@
               ...state.seller,
               state: SellerStates.RequestReceived,
               hasRequest: true,
-              buyerEmail: state.buyer.email,
+              buyerEmail: buyerEmail,
               requestTime: Date.now()
             }
           };
@@ -453,6 +458,8 @@
 
       // Enhanced dispatch that also publishes to PubNub
       const dispatch = React.useCallback((action) => {
+        console.log('[Dispatch] Action:', action.type, 'Current role:', state.role);
+        
         // Dispatch locally first
         baseDispatch(action);
 
@@ -468,12 +475,23 @@
 
         // Only broadcast important transaction events, NOT form inputs
         if (pubnub && broadcastableActions.includes(action.type)) {
-          // Create a sanitized action (remove sensitive data)
-          const sanitizedAction = { ...action };
+          console.log('[PubNub] Broadcasting action:', action.type);
+          
+          // Create a sanitized action (remove sensitive data but keep email)
+          const sanitizedAction = { 
+            ...action,
+            senderId: USER_ID // Add sender ID to prevent receiving own messages
+          };
           
           // Never broadcast credit card info
           if (sanitizedAction.card) {
             delete sanitizedAction.card;
+          }
+          
+          // For BUYER_SUBMIT_PAYMENT, include the buyer's email
+          if (action.type === 'BUYER_SUBMIT_PAYMENT') {
+            sanitizedAction.buyerEmail = state.buyer.email;
+            console.log('[PubNub] Including buyer email:', sanitizedAction.buyerEmail);
           }
           
           pubnub.publish({
@@ -481,7 +499,7 @@
             message: sanitizedAction
           }).catch(err => console.error('PubNub publish error:', err));
         }
-      }, []);
+      }, [state.buyer.email, state.role]);
 
       const toast = React.useMemo(() => ({
         show(message, duration = 3000) {
@@ -513,7 +531,35 @@
           message: (event) => {
             // Receive state updates from other users
             if (event.message && event.message.type) {
-              dispatch(event.message);
+              const action = event.message;
+              
+              console.log('[PubNub] Received action:', action.type, 'Current role:', state.role);
+              
+              // Ignore messages sent by this user (prevent loops!)
+              if (action.senderId === USER_ID) {
+                console.log('[PubNub] Ignoring own message');
+                return;
+              }
+              
+              // Role-based action filtering
+              const currentRole = state.role;
+              
+              // Actions that sellers should receive
+              const sellerActions = ['BUYER_SUBMIT_PAYMENT', 'BUYER_SHARE_OTP'];
+              
+              // Actions that buyers should receive
+              const buyerActions = ['SELLER_ACCEPT_REQUEST', 'SELLER_START_REDEMPTION', 'SEND_OTP', 'SELLER_COMPLETE'];
+              
+              // Only apply actions relevant to current role
+              if (currentRole === Roles.Seller && sellerActions.includes(action.type)) {
+                console.log('[PubNub] Applying action to Seller');
+                baseDispatch(action);
+              } else if (currentRole === Roles.Buyer && buyerActions.includes(action.type)) {
+                console.log('[PubNub] Applying action to Buyer');
+                baseDispatch(action);
+              } else {
+                console.log('[PubNub] Ignoring action - not relevant for', currentRole);
+              }
             }
           },
           status: (statusEvent) => {
@@ -532,7 +578,7 @@
           pubnub.removeListener(listener);
           pubnub.unsubscribe({ channels: [CHANNEL_NAME] });
         };
-      }, []);
+      }, [state.role]);
 
       // Publish state changes to PubNub
       React.useEffect(() => {
