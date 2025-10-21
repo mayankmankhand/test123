@@ -320,7 +320,9 @@
             seller: {
               ...state.seller,
               state: SellerStates.Working,
-              acceptedTime: Date.now()
+              acceptedTime: Date.now(),
+              // Preserve seller's existing data when this comes from remote
+              ...(action.fromRemote ? {} : {})
             }
           };
 
@@ -334,7 +336,9 @@
             },
             seller: {
               ...state.seller,
-              state: SellerStates.Working
+              state: SellerStates.Working,
+              // Preserve seller's existing data when this comes from remote
+              ...(action.fromRemote ? {} : {})
             }
           };
 
@@ -458,7 +462,14 @@
 
       // Enhanced dispatch that also publishes to PubNub
       const dispatch = React.useCallback((action) => {
-        console.log('[Dispatch] Action:', action.type, 'Current role:', state.role);
+        console.log('[Dispatch] Action:', action.type, 'Current role:', state.role, 'Current email:', state.buyer.email);
+        
+        // For BUYER_SUBMIT_PAYMENT, capture email NOW before state updates
+        let emailToSend = null;
+        if (action.type === 'BUYER_SUBMIT_PAYMENT') {
+          emailToSend = state.buyer.email;
+          console.log('[Dispatch] Captured buyer email for broadcast:', emailToSend);
+        }
         
         // Dispatch locally first
         baseDispatch(action);
@@ -489,14 +500,16 @@
           }
           
           // For BUYER_SUBMIT_PAYMENT, include the buyer's email
-          if (action.type === 'BUYER_SUBMIT_PAYMENT') {
-            sanitizedAction.buyerEmail = state.buyer.email;
-            console.log('[PubNub] Including buyer email:', sanitizedAction.buyerEmail);
+          if (action.type === 'BUYER_SUBMIT_PAYMENT' && emailToSend) {
+            sanitizedAction.buyerEmail = emailToSend;
+            console.log('[PubNub] Including buyer email in message:', sanitizedAction.buyerEmail);
           }
           
           pubnub.publish({
             channel: CHANNEL_NAME,
             message: sanitizedAction
+          }).then(() => {
+            console.log('[PubNub] Successfully broadcast:', action.type);
           }).catch(err => console.error('PubNub publish error:', err));
         }
       }, [state.buyer.email, state.role]);
@@ -544,19 +557,22 @@
               // Role-based action filtering
               const currentRole = state.role;
               
-              // Actions that sellers should receive
+              // Actions that sellers should receive (from buyers)
               const sellerActions = ['BUYER_SUBMIT_PAYMENT', 'BUYER_SHARE_OTP'];
               
-              // Actions that buyers should receive
+              // Actions that buyers should receive (from sellers)
               const buyerActions = ['SELLER_ACCEPT_REQUEST', 'SELLER_START_REDEMPTION', 'SEND_OTP', 'SELLER_COMPLETE'];
               
               // Only apply actions relevant to current role
               if (currentRole === Roles.Seller && sellerActions.includes(action.type)) {
                 console.log('[PubNub] Applying action to Seller');
-                baseDispatch(action);
+                if (action.type === 'BUYER_SUBMIT_PAYMENT') {
+                  console.log('[PubNub] Buyer email in received action:', action.buyerEmail);
+                }
+                baseDispatch({ ...action, fromRemote: true });
               } else if (currentRole === Roles.Buyer && buyerActions.includes(action.type)) {
                 console.log('[PubNub] Applying action to Buyer');
-                baseDispatch(action);
+                baseDispatch({ ...action, fromRemote: true });
               } else {
                 console.log('[PubNub] Ignoring action - not relevant for', currentRole);
               }
