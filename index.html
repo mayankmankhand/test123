@@ -375,12 +375,14 @@
           };
 
         case 'BUYER_SHARE_OTP':
+          // OTP comes from action.otp (passed when dispatched)
+          const otpToShare = action.otp || state.buyer.otpEntered;
           return {
             ...state,
             seller: {
               ...state.seller,
               hasOtp: true,
-              receivedOtp: state.buyer.otpEntered
+              receivedOtp: otpToShare
             }
           };
 
@@ -471,6 +473,11 @@
           console.log('[Dispatch] Captured buyer email for broadcast:', emailToSend);
         }
         
+        // For BUYER_SHARE_OTP, log the OTP being shared
+        if (action.type === 'BUYER_SHARE_OTP') {
+          console.log('[Dispatch] Sharing OTP with seller:', action.otp);
+        }
+        
         // Dispatch locally first
         baseDispatch(action);
 
@@ -503,6 +510,11 @@
           if (action.type === 'BUYER_SUBMIT_PAYMENT' && emailToSend) {
             sanitizedAction.buyerEmail = emailToSend;
             console.log('[PubNub] Including buyer email in message:', sanitizedAction.buyerEmail);
+          }
+          
+          // For BUYER_SHARE_OTP, include the OTP
+          if (action.type === 'BUYER_SHARE_OTP' && action.otp) {
+            console.log('[PubNub] Including OTP in message:', action.otp);
           }
           
           pubnub.publish({
@@ -568,6 +580,9 @@
                 console.log('[PubNub] Applying action to Seller');
                 if (action.type === 'BUYER_SUBMIT_PAYMENT') {
                   console.log('[PubNub] Buyer email in received action:', action.buyerEmail);
+                }
+                if (action.type === 'BUYER_SHARE_OTP') {
+                  console.log('[PubNub] Received OTP from buyer:', action.otp);
                 }
                 baseDispatch({ ...action, fromRemote: true });
               } else if (currentRole === Roles.Buyer && buyerActions.includes(action.type)) {
@@ -942,7 +957,7 @@
         // Auto-share when code is complete (6 digits)
         if (value.length === 6) {
           setTimeout(() => {
-            dispatch({ type: 'BUYER_SHARE_OTP' });
+            dispatch({ type: 'BUYER_SHARE_OTP', otp: value });
             toast.show('✓ Code automatically shared with seller');
           }, 300);
         }
